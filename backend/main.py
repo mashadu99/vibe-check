@@ -6,7 +6,9 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from groq import Groq
 from dotenv import load_dotenv
+import concurrent.futures
 from tiktok_search import get_tiktok_context
+from video_transcriber import get_transcription_context
 
 load_dotenv()
 
@@ -115,10 +117,16 @@ async def chat(request: ChatRequest):
         (m["content"] for m in reversed(messages) if m["role"] == "user"), ""
     )
 
-    tiktok_context = get_tiktok_context(last_user_message, client)
+    with concurrent.futures.ThreadPoolExecutor() as ex:
+        tiktok_future = ex.submit(get_tiktok_context, last_user_message, client)
+        transcription_future = ex.submit(get_transcription_context, last_user_message, client)
+        tiktok_context = tiktok_future.result(timeout=12)
+        transcription_context = transcription_future.result(timeout=28)
+
+    combined_context = "\n\n".join(filter(None, [tiktok_context, transcription_context]))
 
     return StreamingResponse(
-        stream_chat(messages, tiktok_context, request.image),
+        stream_chat(messages, combined_context, request.image),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
