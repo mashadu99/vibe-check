@@ -80,7 +80,7 @@ def build_messages_with_image(messages: list[dict], image: str) -> list[dict]:
     return result
 
 
-def stream_chat(messages: list[dict], tiktok_context: str, image: str | None):
+def stream_chat(messages: list[dict], tiktok_context: str, image: str | None, sources: list[dict] | None = None):
     system = build_system_with_context(tiktok_context)
     full_messages = [{"role": "system", "content": system}] + messages
 
@@ -103,6 +103,12 @@ def stream_chat(messages: list[dict], tiktok_context: str, image: str | None):
         if delta.content:
             yield f"data: {json.dumps({'content': delta.content})}\n\n"
 
+    if sources:
+        sources_text = "\n\n---\n📹 **מקורות:**\n" + "\n".join(
+            f"• [{s['title']}]({s['url']})" for s in sources
+        )
+        yield f"data: {json.dumps({'content': sources_text})}\n\n"
+
     yield "data: [DONE]\n\n"
 
 
@@ -121,12 +127,12 @@ async def chat(request: ChatRequest):
         tiktok_future = ex.submit(get_tiktok_context, last_user_message, client)
         transcription_future = ex.submit(get_transcription_context, last_user_message, client)
         tiktok_context = tiktok_future.result(timeout=12)
-        transcription_context = transcription_future.result(timeout=28)
+        transcription_context, sources = transcription_future.result(timeout=28)
 
     combined_context = "\n\n".join(filter(None, [tiktok_context, transcription_context]))
 
     return StreamingResponse(
-        stream_chat(messages, combined_context, request.image),
+        stream_chat(messages, combined_context, request.image, sources),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
